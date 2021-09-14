@@ -1,104 +1,148 @@
-import Post from "../../models/post";
+import Post from '../../models/post';
 import mongoose from 'mongoose';
+import Joi from '../../../node_modules/joi/lib/index';
 
 const { ObjectId } = mongoose.Types;
 
 export const checkObjectId = (ctx, next) => {
-    const { id } = ctx.params;
-    if(!ObjectId.isValid(id)) {
-        ctx.status = 400;
-        return;
-    }
-    return next();
+  const { id } = ctx.params;
+  if (!ObjectId.isValid(id)) {
+    ctx.status = 400;
+    return;
+  }
+  return next();
 };
+
 
 /*
     POST /api/posts
     @title, body, tags[]
 */
-export const write = async ctx => {
-    const { title, body, tags } = ctx.request.body;
-    const post = new Post({
-        title,
-        body,
-        tags,
-    });
+export const write = async (ctx) => {
+  const schema = Joi.object().keys({
+    title: Joi.string().required(),
+    body: Joi.string().required(),
+    tags: Joi.array().items(Joi.string()).required(),
+  });
 
-    try {
-        await post.save();
-        ctx.body = post;
-    } catch (e) {
-        ctx.throw(500, e);
-    }
+  const result = schema.validate(ctx.request.body);
+  if(result.error) {
+    ctx.status = 400;
+    ctx.body = result.error;
+    return;
+  }
+
+  const { title, body, tags } = ctx.request.body;
+  const post = new Post({
+    title,
+    body,
+    tags,
+  });
+
+  try {
+    await post.save();
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
     GET /api/posts
 */
-export const list = async ctx => {
-    try {
-        const posts = await Post.find().exec();
-        ctx.body = posts;
-    } catch (e) {
-        ctx.throw(500, e);
-    }
+export const list = async (ctx) => {
+  const page = parseInt(ctx.query.page || '1', 10);
+
+  if(page < 1) {
+    ctx.status = 400;
+    return;
+  }
+
+  try {
+    const posts = await Post.find()
+      .sort({ _id: -1 })
+      .limit(10)
+      .skip((page - 1) * 10) //n개를 제외하고 다음 데이터
+      .lean() //Json
+      .exec();
+    const postCount = await Post.countDocuments().exec();
+    ctx.set('Last-Page', Math.ceil(postCount / 10));
+    ctx.body = posts.map(post => ({
+        ...post,
+        body:
+          post.body.length < 200 ? post.body : `${post.body.slice(1, 200)}...`,
+      }));
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /* 
     GET /api/posts/:id
 */
-export const read = async ctx => {
-    const { id } = ctx.params;
-    
-    try {
-        const post = await Post.findById(id).exec();
-        
-        if(!post) {
-            ctx.status = 404;
-            return;
-        }
-        
-        ctx.body = post;
+export const read = async (ctx) => {
+  const { id } = ctx.params;
 
-    } catch (e) {
-        ctx.throw(500, e);
+  try {
+    const post = await Post.findById(id).exec();
+
+    if (!post) {
+      ctx.status = 404;
+      return;
     }
+
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
     DELETE /api/posts/:id
 */
-export const remove = async ctx => {
-    const { id } = ctx.params;
-    
-    try {
-        await Post.findOneAndRemove(id).exec();
-        ctx.status = 204;
-    } catch (e) {
-        ctx.throw(500, e);
-    }
+export const remove = async (ctx) => {
+  const { id } = ctx.params;
+
+  try {
+    await Post.findOneAndRemove(id).exec();
+    ctx.status = 204;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
 
 /*
     PATCH /api/posts/:id
     @title, body, tags[]
 */
-export const update = async ctx => {
-    const { id } = ctx.params;
+export const update = async (ctx) => {
+  const { id } = ctx.params;
 
-    try {
-        const post = await Post.findByIdAndUpdate(id, ctx.request.body, {
-            new: true, //업데이트된 데이터 반환, fasle : 업데이트 되기 전 데이터 반환
-        }).exec();
+  const schema = Joi.object().keys({
+    title: Joi.string(),
+    body: Joi.string(),
+    tags: Joi.array().items(Joi.string()),
+  });
 
-        if(!post) {
-            ctx.status = 404;
-            return;
-        }
-        
-        ctx.body = post;
+  const result = schema.validate(ctx.request.body);
+  if(result.error) {
+    ctx.status = 400;
+    ctx.body = result.error;
+    return;
+  }
 
-    } catch (e) {
-        ctx.throw(500, e);
+  try {
+    const post = await Post.findByIdAndUpdate(id, ctx.request.body, {
+      new: true, //업데이트된 데이터 반환, fasle : 업데이트 되기 전 데이터 반환
+    }).exec();
+
+    if (!post) {
+      ctx.status = 404;
+      return;
     }
+
+    ctx.body = post;
+  } catch (e) {
+    ctx.throw(500, e);
+  }
 };
